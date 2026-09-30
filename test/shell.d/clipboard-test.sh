@@ -259,6 +259,10 @@ if [[ $1 == "--list-types" ]]; then
   printf '%b' "${WL_PASTE_TYPES:-text/plain\n}"
 elif [[ $1 == "--type" && $2 == "text" ]]; then
   [[ ${WL_PASTE_STALL:-} == "text" ]] && sleep 10
+  if [[ ${WL_PASTE_STALL:-} == "text-midway" ]]; then
+    printf 'first half '
+    sleep 10
+  fi
   printf '%s' "${WL_PASTE_TEXT:-terminal copy}"
 fi
 SH
@@ -313,6 +317,32 @@ fi
 [[ -z $capture_output ]] || fail "clipboard snapshot timeout emits no partial entry" "actual: $capture_output"
 pass "clipboard snapshot text read uses its internal timeout"
 pass "clipboard snapshot timeout emits no partial entry"
+
+if capture_output=$(WL_PASTE_STALL="text-midway" XDG_RUNTIME_DIR="$TMPDIR" XDG_STATE_HOME="$TMPDIR/state" PATH="$TMPDIR/bin:$PATH" timeout --preserve-status 4s "$ROOT/shell/plugins/clipboard/capture.sh"); then
+  capture_status=0
+else
+  capture_status=$?
+fi
+[[ $capture_status -eq 124 ]] || fail "clipboard snapshot text read stalled midway uses its internal timeout" "capture exited with status $capture_status"
+[[ -z $capture_output ]] || fail "clipboard snapshot stalled midway emits no partial entry" "actual: $capture_output"
+pass "clipboard snapshot text read stalled midway uses its internal timeout"
+pass "clipboard snapshot stalled midway emits no partial entry"
+
+for watched_mime in text image/png; do
+  if capture_output=$({ printf 'copy whose owner never closes'; sleep 5; } | XDG_RUNTIME_DIR="$TMPDIR" XDG_STATE_HOME="$TMPDIR/state" PATH="$TMPDIR/bin:$PATH" timeout --preserve-status 4s "$ROOT/shell/plugins/clipboard/capture.sh" "$watched_mime"); then
+    capture_status=0
+  else
+    capture_status=$?
+  fi
+  [[ $capture_status -eq 0 ]] || fail "clipboard watched $watched_mime read is bounded when the owner stalls" "capture exited with status $capture_status"
+  [[ -z $capture_output ]] || fail "clipboard watched $watched_mime cut off by a stalled owner emits no entry" "actual: $capture_output"
+  pass "clipboard watched $watched_mime read is bounded when the owner stalls"
+  pass "clipboard watched $watched_mime cut off by a stalled owner emits no entry"
+done
+
+leftover=$(find "$TMPDIR/state/omarchy" -name 'clipboard.*' -print)
+[[ -z $leftover ]] || fail "clipboard capture removes copies it dropped" "left: $leftover"
+pass "clipboard capture removes copies it dropped"
 
 capture_output=$(printf '%s' 'UTF-16 clipboard - fixed' | iconv -f UTF-8 -t UTF-16LE | XDG_RUNTIME_DIR="$TMPDIR" XDG_STATE_HOME="$TMPDIR/state" PATH="$TMPDIR/bin:$PATH" "$ROOT/shell/plugins/clipboard/capture.sh" text)
 [[ $capture_output == '{"type":"text","text":"UTF-16 clipboard - fixed"}' ]] || fail "clipboard capture decodes UTF-16LE text"
